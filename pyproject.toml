@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adaptive-ml-moderation"
+version = "0.2.0"
+description = "Low-latency (<150ms) ML content moderation pipeline with char/word TF-IDF classifier, priority triage queue, leakage-safe splitting, and PSI drift feedback loop"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

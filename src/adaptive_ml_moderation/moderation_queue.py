@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import heapq
+import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
+
+
+def _binary_entropy(p: float) -> float:
+    clamped = min(max(p, 1e-12), 1.0 - 1e-12)
+    return round(-clamped * math.log2(clamped) - (1.0 - clamped) * math.log2(1.0 - clamped), 5)
 
 
 @dataclass
@@ -16,17 +22,24 @@ class ModerationItem:
     triage_band: str
     status: str = "PENDING"
     moderator_id: Optional[str] = None
+    prediction_entropy: float = 0.0
     audit_trail: List[str] = field(default_factory=list)
 
 
 class PriorityModerationQueue:
     """Three-band triage router (AUTO_ALLOW, HUMAN_REVIEW, AUTO_BLOCK) with max-risk priority heap."""
 
-    def __init__(self, review_threshold: float = 0.38, auto_block_threshold: float = 0.82) -> None:
+    def __init__(
+        self,
+        review_threshold: float = 0.38,
+        auto_block_threshold: float = 0.82,
+        require_human_validation: bool = False,
+    ) -> None:
         if not (0.0 < review_threshold < auto_block_threshold < 1.0):
             raise ValueError("Thresholds must satisfy 0 < review_threshold < auto_block_threshold < 1")
         self.review_threshold = review_threshold
         self.auto_block_threshold = auto_block_threshold
+        self.require_human_validation = require_human_validation
         self._heap: List[tuple[float, int, str]] = []
         self._seq: int = 0
         self._items: Dict[str, ModerationItem] = {}
@@ -43,10 +56,16 @@ class PriorityModerationQueue:
         if item_id in self._items:
             raise ValueError(f"Duplicate item_id: {item_id}")
 
+        entropy = _binary_entropy(risk_score)
         if risk_score >= self.auto_block_threshold:
-            band = "AUTO_BLOCK"
-            status = "REJECTED"
-            trail = [f"auto_blocked(score={risk_score:.3f})"]
+            if self.require_human_validation:
+                band = "HUMAN_REVIEW"
+                status = "PENDING"
+                trail = [f"high_risk_queued_for_human_validation(score={risk_score:.3f})"]
+            else:
+                band = "AUTO_BLOCK"
+                status = "REJECTED"
+                trail = [f"auto_blocked(score={risk_score:.3f})"]
         elif risk_score >= self.review_threshold:
             band = "HUMAN_REVIEW"
             status = "PENDING"
@@ -65,6 +84,7 @@ class PriorityModerationQueue:
             created_at_epoch=created_at_epoch,
             triage_band=band,
             status=status,
+            prediction_entropy=entropy,
             audit_trail=trail,
         )
         self._items[item_id] = item

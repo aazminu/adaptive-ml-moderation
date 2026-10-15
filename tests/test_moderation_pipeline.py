@@ -42,10 +42,12 @@ def test_online_feedback_update_adjusts_risk_score() -> None:
         ["hello friend nice post", "awful toxic spam attack"],
         [0, 1],
     )
-    sample = "borderline phrase needing moderator override"
+    # Entirely unseen OOV slang tokens must be registered into _idf and _weights
+    sample = "zzzxq99 novel obfuscated slur"
     before = clf.score_text(sample).risk_probability
     after = clf.online_feedback_update(sample, verified_label=1, weight=3.0)
     assert after > before
+    assert clf._weights.get("w:zzzxq99", 0.0) > 0.0
 
 
 def test_priority_moderation_queue_triage_and_audit_trail() -> None:
@@ -58,6 +60,7 @@ def test_priority_moderation_queue_triage_and_audit_trail() -> None:
     assert low.triage_band == "AUTO_ALLOW" and low.status == "APPROVED"
     assert high.triage_band == "AUTO_BLOCK" and high.status == "REJECTED"
     assert mid1.triage_band == "HUMAN_REVIEW" and mid2.triage_band == "HUMAN_REVIEW"
+    assert mid1.prediction_entropy > high.prediction_entropy
 
     # Highest risk HUMAN_REVIEW item must pop first
     first_pop = q.pop_next_for_review()
@@ -65,6 +68,16 @@ def test_priority_moderation_queue_triage_and_audit_trail() -> None:
     resolved = q.resolve_item("m3", "REJECTED", moderator_id="mod_alice")
     assert resolved.status == "REJECTED"
     assert any("mod_alice->REJECTED" in entry for entry in resolved.audit_trail)
+
+    # When require_human_validation=True, even high-risk items must require human sign-off
+    q_safe = PriorityModerationQueue(
+        review_threshold=0.35, auto_block_threshold=0.80, require_human_validation=True
+    )
+    guarded = q_safe.ingest("m_high", "th9", "u9", "high risk text", 0.95, 1005.0)
+    assert guarded.triage_band == "HUMAN_REVIEW"
+    assert guarded.status == "PENDING"
+    assert q_safe.pop_next_for_review() == guarded
+
 
 
 def test_leakage_safe_splitter_and_psi_drift() -> None:

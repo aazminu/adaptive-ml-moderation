@@ -33,6 +33,7 @@ class HybridTfidfToxicityClassifier:
         self._idf: Dict[str, float] = {}
         self._weights: Dict[str, float] = {}
         self._bias: float = 0.0
+        self._doc_count: int = 1
 
     @staticmethod
     def _sigmoid(z: float) -> float:
@@ -84,6 +85,7 @@ class HybridTfidfToxicityClassifier:
         if not texts or len(texts) != len(labels):
             raise ValueError("texts and labels must be non-empty and equal length")
         n = len(texts)
+        self._doc_count = n
         weights = list(sample_weights) if sample_weights is not None else [1.0] * n
 
         df: Counter[str] = Counter()
@@ -139,11 +141,19 @@ class HybridTfidfToxicityClassifier:
     def online_feedback_update(self, text: str, verified_label: int, weight: float = 2.0) -> float:
         if verified_label not in (0, 1):
             raise ValueError("verified_label must be 0 or 1")
+        raw_counts = self._extract_raw_tokens(text)
+        default_oov_idf = math.log((1.0 + max(self._doc_count, 1)) / 2.0) + 1.0
+        for feat in raw_counts:
+            if feat not in self._idf:
+                self._idf[feat] = default_oov_idf
+                self._weights[feat] = 0.0
+
         vec = self._vectorize(text)
         logit = self._bias + sum(self._weights.get(f, 0.0) * v for f, v in vec.items())
         pred = self._sigmoid(logit)
         err = (pred - float(verified_label)) * weight
-        self._bias -= 0.25 * err
+        self._bias -= 0.15 * err
         for f, v in vec.items():
-            self._weights[f] = self._weights.get(f, 0.0) - 0.25 * err * v
+            self._weights[f] = self._weights.get(f, 0.0) - 0.50 * err * v
         return self.score_text(text).risk_probability
+
